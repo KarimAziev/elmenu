@@ -249,7 +249,7 @@ Return new position if changed, nil otherwise."
   "Return non-nil if SEXP is declared form."
   (pcase sexp
     (`(defvar ,name)
-     (list 'defvar :declared-variable name))
+     (list 'defvar name))
     (`(declare-function ,name)
      (list 'declare-function name))
     (`(declare-function ,name
@@ -261,6 +261,7 @@ Return new position if changed, nil otherwise."
      (list 'declare-function name))
     (`(declare-function ,name ,_file ,_args ,_fileonly)
      (list 'declare-function name))))
+
 (defun elmenu-list-at-point ()
   "Return list at point."
   (when-let ((sexp (sexp-at-point)))
