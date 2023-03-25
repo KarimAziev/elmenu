@@ -67,7 +67,6 @@
      ("cl-defgeneric" . 3)
      ("cl-defmethod" . 3))))
 
-
 (defvar elmenu-modes-types
   (elmenu-intern-cars '(("define-minor-mode" . 2)
                         ("define-derived-mode" . 4)
@@ -76,7 +75,6 @@
                          3)
                         ("easy-mmode-define-minor-mode"
                          . 2))) )
-
 
 (defvar elmenu-def-type-poses
   (append
@@ -115,6 +113,7 @@
                            '(("defvar" . 3)
                              ("defconst" . 3)
                              ("defvar-local" . 3))))
+
 (defvar elmenu-def-type-poses
   (append
    (elmenu-intern-cars
@@ -129,6 +128,7 @@
    elmenu-custom-types
    elmenu-func-types
    elmenu-modes-types))
+
 (defvar elmenu-func-types
   (elmenu-intern-cars
    '(("defun" . 3)
@@ -145,6 +145,7 @@
      ("cl-defmacro" . 3)
      ("cl-defgeneric" . 3)
      ("cl-defmethod" . 3))))
+
 (defun elmenu-re-search-forward-inner (regexp &optional bound count)
   "This function is helper for `elmenu-re-search-forward'.
 Search forward from point for regular expression REGEXP.
@@ -240,11 +241,13 @@ Return new position if changed, nil otherwise."
   (while (memq (car-safe exp) '(quote function))
     (setq exp (cadr exp)))
   exp)
+
 (defun elmenu-parse-sexp-from-backward ()
   "Scan sexp at point from backward."
   (forward-sexp 1)
   (backward-char 1)
   (elmenu-parse-backward))
+
 (defun elmenu-sexp-declare-p (sexp)
   "Return non-nil if SEXP is declared form."
   (pcase sexp
@@ -267,12 +270,14 @@ Return new position if changed, nil otherwise."
   (when-let ((sexp (sexp-at-point)))
     (when (proper-list-p sexp)
       sexp)))
+
 (defun elmenu-re-search-backward (regexp &optional bound noerror count)
   "Search backward from point for REGEXP ignoring elisp comments and strings.
 
 Arguments BOUND, NOERROR, COUNT has the same meaning as `re-search-forward'."
   (elmenu-re-search-forward regexp bound noerror
                                 (if count (- count) -1)))
+
 (defun elmenu-make-re (name)
   "Convert NAME to regexp and surround the result with `\\\\_<' and `\\\\_>'."
   (concat "\\_<" "\\(" (regexp-opt (list name
@@ -280,6 +285,7 @@ Arguments BOUND, NOERROR, COUNT has the same meaning as `re-search-forward'."
                                    t)
           "\\)"
           "\\_>"))
+
 (defun elmenu-get-doc-from-sexp (sexp)
   "Return documentation from SEXP."
   (when (proper-list-p sexp)
@@ -300,6 +306,7 @@ Arguments BOUND, NOERROR, COUNT has the same meaning as `re-search-forward'."
          (let ((value (nth pos sexp)))
            (when (stringp value)
              value)))))))
+
 (defun elmenu-buffer-jump-to-form (type name)
   "Search for definition with TYPE and NAME."
   (let ((re (elmenu-make-re (symbol-name name)))
@@ -322,6 +329,7 @@ Arguments BOUND, NOERROR, COUNT has the same meaning as `re-search-forward'."
     (when found
       (goto-char found)
       found)))
+
 (defun elmenu-parse-at-point ()
   "Parse `sexp-at-point' at point."
   (let* ((item (elmenu-list-at-point))
@@ -410,6 +418,7 @@ Arguments BOUND, NOERROR, COUNT has the same meaning as `re-search-forward'."
                            (macrop type))
                        (listp (cdr item))))
            (list (seq-take item 2))))))))
+
 (defmacro elmenu-with-every-top-form (&rest body)
   "Bind VARS and eval BODY in current buffer on every top level form."
   (declare (indent 1)
@@ -422,6 +431,7 @@ Arguments BOUND, NOERROR, COUNT has the same meaning as `re-search-forward'."
                    (looking-at "[(]"))
          (save-excursion
            ,@body)))))
+
 (defun elmenu--buffer ()
   "Scan current buffer."
   (let ((items))
@@ -710,11 +720,13 @@ PROPS is a plist to put on overlay."
                        (remove nil
                                (list type
                                      interactivep
-                                     autloaded))
+                                     autloaded
+                                     (replace-regexp-in-string
+                                      "[\n\r\f]" "\s"
+                                      (or (plist-get pl
+                                                     :doc)
+                                          ""))))
                        " ")))))
-         (cycle-sort-fn (lambda (it) it))
-         (display-sort-fn (lambda (it)
-                            (seq-sort-by #'length '< it)))
          (category 'symbol))
     (minibuffer-with-setup-hook
         (lambda ()
@@ -728,11 +740,7 @@ PROPS is a plist to put on overlay."
                                        (if (eq action 'metadata)
                                            `(metadata
                                              (annotation-function . ,annotf)
-                                             (cycle-sort-function .
-                                                                  ,cycle-sort-fn)
-                                             (category . ,category)
-                                             (display-sort-function .
-                                                                    ,display-sort-fn))
+                                             (category . ,category))
                                          (complete-with-action action alist
                                                                str pred)))))
        alist))))
