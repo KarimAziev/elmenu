@@ -213,6 +213,7 @@ Arguments BOUND, NOERROR, COUNT has the same meaning as `re-search-forward'."
        (unless noerror
          (signal (car err)
                  (cdr err)))))))
+
 (defun elmenu-parse-backward ()
   "Recursively scan backward forms."
   (let ((items))
@@ -220,6 +221,7 @@ Arguments BOUND, NOERROR, COUNT has the same meaning as `re-search-forward'."
                 (looking-at "[(]"))
       (setq items (nconc items (elmenu-parse-at-point))))
     items))
+
 (defun elmenu-backward-list (&optional n)
   "Move backward across N balanced group of parentheses.
 Return new position if changed, nil otherwise."
@@ -230,6 +232,7 @@ Return new position if changed, nil otherwise."
                 (point)))
     (unless (equal pos end)
       end)))
+
 (defun elmenu-unquote (exp)
   "Return EXP unquoted."
   (declare (pure t)
@@ -675,10 +678,8 @@ PROPS is a plist to put on overlay."
     (elmenu-overlay-unset-and-remove 'elmenu--overlay)))
 
 
-;;;###autoload
-(defun elmenu-jump ()
+(defun elmenu-jump-completing-read ()
   "Scan buffer and jump to item."
-  (interactive)
   (let* ((alist (elmenu-buffer-to-alist))
          (max-len (1+ (apply #'max (mapcar (lambda (it)
                                              (length (symbol-name (car it))))
@@ -720,15 +721,30 @@ PROPS is a plist to put on overlay."
             (let ((map (make-composed-keymap elmenu-minibuffer-map
                                              (current-local-map))))
               (use-local-map map))))
-      (completing-read "Symbol: "
-                       (lambda (str pred action)
-                         (if (eq action 'metadata)
-                             `(metadata
-                               (annotation-function . ,annotf)
-                               (cycle-sort-function . ,cycle-sort-fn)
-                               (category . ,category)
-                               (display-sort-function . ,display-sort-fn))
-                           (complete-with-action action alist str pred)))))))
+      (assq
+       (intern-soft (completing-read "Symbol: "
+                                     (lambda (str pred action)
+                                       (if (eq action 'metadata)
+                                           `(metadata
+                                             (annotation-function . ,annotf)
+                                             (cycle-sort-function .
+                                                                  ,cycle-sort-fn)
+                                             (category . ,category)
+                                             (display-sort-function .
+                                                                    ,display-sort-fn))
+                                         (complete-with-action action alist
+                                                               str pred)))))
+       alist))))
+
+
+;;;###autoload
+(defun elmenu-jump ()
+  "Scan buffer and jump to item."
+  (interactive)
+  (let ((cell (elmenu-jump-completing-read)))
+    (elmenu-buffer-jump-to-form (plist-get (cdr cell) :type)
+                                (car cell))
+    (elmenu-highlight-sexp-at-point)))
 
 (provide 'elmenu)
 ;;; elmenu.el ends here
