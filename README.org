@@ -1,0 +1,34 @@
+* elmenu
+
+Imenu like utility for jumping to Elisp Symbols.
+
+** Installation
+
+Emacs >= 28.1 is required.
+
+*** Manual
+
+Download the source code and put it wherever you like, e.g. into =~/.emacs.d/elmenu/=
+
+#+begin_src shell :eval no
+git clone https://github.com/KarimAziev/elmenu.git ~/.emacs.d/elmenu/
+#+end_src
+
+Add the downloaded directory to the load path:
+
+#+begin_src elisp :eval no
+(add-to-list 'load-path "~/.emacs.d/elmenu/")
+(require 'elmenu)
+#+end_src
+
+#+begin_src elisp :eval no
+(use-package elmenu
+  :straight (elmenu
+             :repo "KarimAziev/elmenu"
+             :type git
+             :host github)
+  :bind ((:map elmenu-minibuffer-map
+               ("C-j" . elmenu-minibuffer-jump-to-item)
+               ("C-c TAB" . elmenu-insert-and-exit)))
+  :commands (elmenu-jump))
+#+end_src
