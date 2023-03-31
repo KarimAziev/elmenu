@@ -220,7 +220,7 @@ Arguments BOUND, NOERROR, COUNT has the same meaning as `re-search-forward'."
   (let ((items))
     (while (and (elmenu-backward-list)
                 (looking-at "[(]"))
-      (setq items (nconc items (elmenu-parse-at-point))))
+      (setq items (nconc items (elmenu-parse-sexp-at-point))))
     items))
 
 (defun elmenu-backward-list (&optional n)
@@ -292,132 +292,179 @@ Arguments BOUND, NOERROR, COUNT has the same meaning as `re-search-forward'."
     (let* ((type (car-safe sexp))
            (pos (and type
                      (cdr
-                      (assq type elmenu-def-type-poses)))))
-      (pcase type
-        ('defvar-keymap (plist-get sexp :doc))
-        ((guard (and pos
-                     (eq type 'cl-defmethod)
-                     (memq (nth 2 sexp) '(:around :after
-                                                  :before))))
-         (let ((value (nth (1+ pos) sexp)))
-           (when (stringp value)
-             value)))
-        ((guard (and pos))
-         (let ((value (nth pos sexp)))
-           (when (stringp value)
-             value)))))))
+                      (assq type elmenu-def-type-poses))))
+           (doc-str (pcase type
+                      ('defvar-keymap (plist-get sexp :doc))
+                      ((guard (and pos
+                                   (eq type 'cl-defmethod)
+                                   (memq (nth 2 sexp) '(:around :after
+                                                                :before))))
+                       (nth (1+ pos) sexp))
+                      ((guard (and pos))
+                       (nth pos sexp)))))
+      (when (stringp doc-str)
+        (replace-regexp-in-string
+         "[\n\r\f]" "\s"
+         (or doc-str
+             ""))))))
 
-(defun elmenu-buffer-jump-to-form (type name)
-  "Search for definition with TYPE and NAME."
-  (let ((re (elmenu-make-re (symbol-name name)))
-        (found))
-    (save-excursion
-      (goto-char (point-max))
-      (while (and (not found)
-                  (elmenu-re-search-backward re nil t))
-        (let ((parse-sexp-ignore-comments t))
-          (setq found (ignore-errors (forward-sexp -1)
-                                     (when (eq type (symbol-at-point))
-                                       (backward-up-list 1)
-                                       (when-let ((sexp
-                                                   (sexp-at-point)))
-                                         (when (and (eq (car-safe sexp)
-                                                        type)
-                                                    (eq (nth 1 sexp)
-                                                        name))
-                                           (point)))))))))
-    (when found
-      (goto-char found)
-      found)))
+(defun elmenu-format-args (arglist)
+  "Return ARGLIST as a string enclosed by ()."
+  (if (not arglist)
+      "()"
+    (format "%S" (mapcar (lambda (arg)
+                           (cond ;; Parameter name.
+                            ((symbolp arg)
+                             (let ((name (symbol-name arg)))
+                               (cond
+                                ((string-match "\\`&" name)
+                                 (bare-symbol arg))
+                                ((string-match "\\`_." name)
+                                 (intern (upcase (substring name 1))))
+                                (t (intern (upcase name))))))
+                            ;; Parameter with a default value (from
+                            ;; cl-defgeneric etc).
+                            ((and (consp arg)
+                                  (symbolp (car arg)))
+                             (cons (intern (upcase (symbol-name (car arg)))) (cdr arg)))
+                            ;; Something else.
+                            (t arg)))
+                         arglist))))
 
-(defun elmenu-parse-at-point ()
+(defun elmenu-buffer-jump-to-form (cell)
+  "Search for definition with CELL."
+  (when-let* ((pl (cdr cell))
+              (beg (when pl (plist-get pl :beg)))
+              (buff (let ((b (marker-buffer beg)))
+                      (when (buffer-live-p b)
+                        b))))
+    (if (not (eq (current-buffer)
+                 buff))
+        (with-current-buffer buff
+          (goto-char beg)
+          (pop-to-buffer-same-window buff)
+          (elmenu-highlight-sexp-at-point)))
+    (goto-char beg)
+    (elmenu-highlight-sexp-at-point)))
+
+(defun elmenu-parse-sexp-at-point ()
   "Parse `sexp-at-point' at point."
-  (let* ((item (elmenu-list-at-point))
-         (type (car-safe item)))
-    (when (and type
-               (symbolp type)
-               (not (nth 4 (syntax-ppss (point)))))
-      (let ((doc (elmenu-get-doc-from-sexp item))
-            (declaration (elmenu-sexp-declare-p item))
-            (autoload-cookies
-             (save-excursion
-               (forward-line -1)
-               (when (looking-at ";;;###")
-                 (buffer-substring-no-properties (line-beginning-position)
-                                                 (line-end-position))))))
-        (pcase type
-          ((guard declaration)
-           (list declaration))
-          ((or 'use-package 'use-package!)
-           (let ((data (save-excursion
-                         (elmenu-parse-sexp-from-backward)))
-                 (v `(use-package ,(nth 1 item))))
-             (if data
-                 (push v data)
-               (list v))))
-          ((or 'with-eval-after-load 'eval-when-compile
-               'eval-after-load
-               'straight-use-package 'if 'progn
-               'and
-               'if-let 'when-let 'with-no-warnings
-               'when 'unless 'eval-and-compile)
-           (save-excursion
-             (elmenu-parse-sexp-from-backward)))
-          ((or 'setq 'setq-default)
-           (remove nil (seq-map-indexed (lambda (v i)
-                                          (if (eq (logand i 1) 0)
-                                              (list type v)
-                                            nil))
-                                        (seq-drop item 1))))
-          ((or 'require 'provide)
-           (list (append (list (car-safe item)
-                               (elmenu-unquote (nth 1 item)))
-                         (seq-drop item 2))))
-          ((guard
-            (and (assq type elmenu-interactive-types)
-                 (eq 'interactive (if doc
-                                      (car-safe
-                                       (car-safe
-                                        (cdr-safe
-                                         (member doc
-                                                 item))))
-                                    (nth
-                                     (cdr
-                                      (assq type
-                                            elmenu-interactive-types))
-                                     item)))))
-           (list (list (car item)
-                       (cadr item)
-                       (caddr item)
-                       doc
-                       :interactive
-                       :autoload autoload-cookies)))
-          ((guard
-            (assq type elmenu-non-defun-command-types))
-           (list (append
-                  (seq-take item
-                            (cdr
-                             (assq type
-                                   elmenu-non-defun-command-types)))
-                  (list doc :interactive
-                        :autoload autoload-cookies))))
-          ((guard (assq type (append
-                              elmenu-custom-types
-                              elmenu-var-types)))
-           (let* ((i (cdr (assq type (append elmenu-custom-types
-                                             elmenu-var-types))))
-                  (value (seq-take item (1- i))))
-             (list (nconc value (list doc :autoload autoload-cookies)))))
-          ((guard (assq type elmenu-def-type-poses))
-           (let ((value
-                  (seq-take item (cdr (assq type elmenu-def-type-poses)))))
-             (list (nconc value (list doc :autoload autoload-cookies)))))
-          ((or 'add-hook 'remove-hook)
-           (list item))
-          ((guard (and (or (special-form-p type)
-                           (macrop type))
-                       (listp (cdr item))))
-           (list (seq-take item 2))))))))
+  (with-syntax-table emacs-lisp-mode-syntax-table
+    (let* ((item (elmenu-list-at-point))
+           (type (car-safe item)))
+      (when (and type
+                 (symbolp type)
+                 (not (nth 4 (syntax-ppss (point)))))
+        (let ((beg (point-marker))
+              (doc (elmenu-get-doc-from-sexp item))
+              (sym (cond ((not (cadr item))
+                          nil)
+                         ((and (symbolp (cadr item)))
+                          (cadr item))
+                         (t (elmenu-unquote (cadr item)))))
+              (declaration (elmenu-sexp-declare-p item))
+              (cell))
+          (setq cell
+                (pcase type
+                  ((guard declaration)
+                   (cons sym
+                         (list
+                          :type type
+                          :declared t
+                          :beg beg)))
+                  ((or 'use-package 'use-package!)
+                   (let* ((data (save-excursion
+                                  (elmenu-parse-sexp-from-backward)))
+                          (v (cons sym (list
+                                        :type type
+                                        :beg beg))))
+                     (if data
+                         (setq data (nconc data (list v)))
+                       (list v))))
+                  ((or 'with-eval-after-load 'eval-when-compile
+                       'eval-after-load
+                       'straight-use-package 'if 'progn
+                       'and
+                       'let 'if-let 'when-let 'with-no-warnings
+                       'when 'unless 'eval-and-compile)
+                   (save-excursion
+                     (elmenu-parse-sexp-from-backward)))
+                  ((or 'require 'provide)
+                   (cons sym
+                         (list
+                          :beg beg
+                          :type type)))
+                  ((guard
+                    (assq type elmenu-func-types))
+                   (cons sym
+                         (list
+                          :type type
+                          :beg beg
+                          :args (elmenu-format-args (caddr item))
+                          :doc doc
+                          :interactive (when
+                                           (assq type elmenu-interactive-types)
+                                         (eq 'interactive
+                                             (if doc
+                                                 (car-safe
+                                                  (car-safe
+                                                   (cdr-safe
+                                                    (member doc
+                                                            item))))
+                                               (car-safe (nth
+                                                          (cdr
+                                                           (assq type
+                                                                 elmenu-interactive-types))
+                                                          item)))))
+                          :autoload
+                          (save-excursion
+                            (forward-line -1)
+                            (when (looking-at ";;;###")
+                              (buffer-substring-no-properties
+                               (line-beginning-position)
+                               (line-end-position)))))))
+                  ((guard (assq type (append
+                                      elmenu-custom-types
+                                      elmenu-var-types)))
+                   (cons sym
+                         (list
+                          :type type
+                          :doc doc
+                          :beg beg
+                          :autoload
+                          (save-excursion
+                            (forward-line -1)
+                            (when (looking-at
+                                   ";;;###")
+                              (buffer-substring-no-properties
+                               (line-beginning-position)
+                               (line-end-position)))))))
+                  ((guard (assq type elmenu-modes-types))
+                   (cons sym (list
+                              :type type
+                              :beg beg
+                              :doc doc
+                              :autoload
+                              (save-excursion
+                                (forward-line -1)
+                                (when (looking-at
+                                       ";;;###")
+                                  (buffer-substring-no-properties
+                                   (line-beginning-position)
+                                   (line-end-position)))))))
+                  ((guard (assq type elmenu-def-type-poses))
+                   (cons sym (list
+                              :doc doc
+                              :type type
+                              :beg beg)))
+                  ((or 'add-hook 'remove-hook)
+                   (cons sym (list
+                              :type type
+                              :beg beg)))))
+          (if (and (car-safe cell)
+                   (symbolp (car cell)))
+              (list cell)
+            cell))))))
 
 (defmacro elmenu-with-every-top-form (&rest body)
   "Bind VARS and eval BODY in current buffer on every top level form."
@@ -436,21 +483,18 @@ Arguments BOUND, NOERROR, COUNT has the same meaning as `re-search-forward'."
   "Scan current buffer."
   (let ((items))
     (elmenu-with-every-top-form
-        (setq items (nconc items (elmenu-parse-at-point))))
+        (setq items (nconc items (elmenu-parse-sexp-at-point))))
     (nreverse items)))
 
 (defvar-local elmenu-cached-items nil)
+(defvar-local elmenu-cached-alist nil)
 (defvar-local elmenu-cached-items-buffer-tick nil
   "Buffer modified tick.")
 
 (defun elmenu-buffer ()
-  "Elisp find items in buffer.
-IN BUFFER"
+  "Find items in buffer."
   (let ((tick (buffer-modified-tick)))
-    (if (and
-         elmenu-cached-items-buffer-tick
-         (eq elmenu-cached-items-buffer-tick tick)
-         elmenu-cached-items)
+    (if (eq elmenu-cached-items-buffer-tick tick)
         elmenu-cached-items
       (setq elmenu-cached-items-buffer-tick tick)
       (setq elmenu-cached-items
@@ -573,10 +617,8 @@ completion UI highly compatible with it, like Icomplete."
                (elmenu-minibuffer-get-current-candidate)))
     (with-minibuffer-selected-window
       (when-let ((cell (assq (intern-soft current)
-                             (elmenu-buffer-to-alist))))
-        (elmenu-buffer-jump-to-form (plist-get (cdr cell) :type)
-                                        (car cell))
-        (elmenu-highlight-sexp-at-point)))))
+                             (elmenu-buffer))))
+        (elmenu-buffer-jump-to-form cell)))))
 
 (defun elmenu-minibuffer-get-current-candidate ()
   "Return cons filename for current completion candidate."
@@ -592,27 +634,6 @@ completion UI highly compatible with it, like Icomplete."
        (and target (minibufferp))))
     target))
 
-(defun elmenu-buffer-to-alist ()
-  "Elisp find items in buffer.
-IN BUFFER"
-  (mapcar (lambda (it)
-            (let ((sym (cadr it))
-                  (type (car it))
-                  (args (nth 2 it))
-                  (doc (elmenu-get-doc-from-sexp it))
-                  (pl))
-              (setq pl (list
-                        :doc doc
-                        :args (when (assq type elmenu-func-types)
-                                args)
-                        :interactive
-                        (and (memq :interactive
-                                   it)
-                             t)
-                        :type type
-                        :autoload (car (seq-drop (memq :autoload it) 1))))
-              (cons sym (elmenu-plist-remove-nils pl))))
-          (elmenu-buffer)))
 
 
 (defvar elmenu-minibuffer-map
@@ -688,45 +709,51 @@ PROPS is a plist to put on overlay."
                   unread-command-events))
     (elmenu-overlay-unset-and-remove 'elmenu--overlay)))
 
+(defun elmenu-annotate-fn (alist)
+  "Make annotation function from ALIST."
+  (let* ((max-len (1+ (apply #'max (mapcar (lambda (it)
+                                             (when (symbolp (car it))
+                                               (length (symbol-name (car it)))))
+                                           alist)))))
+    (lambda (str)
+      (let* ((sym (if (stringp str)
+                      (intern-soft str)
+                    str))
+             (pl (cdr (assq
+                       sym
+                       alist)))
+             (type (propertize
+                    (capitalize
+                     (format "%s"
+                             (plist-get pl
+                                        :type)))
+                    'face
+                    'font-lock-keyword-face))
+             (args (plist-get pl :args))
+             (interactivep
+              (and (plist-get pl :interactive)
+                   (propertize "Command" 'face
+                               'completions-annotations)))
+             (autloaded (and (plist-get pl :autoload)
+                             (propertize
+                              "AUTOLOAD"
+                              'face 'font-lock-warning-face))))
+        (concat
+         (propertize " " 'display `(space :align-to ,max-len))
+         (string-join
+          (remove nil
+                  (list
+                   type
+                   args
+                   interactivep
+                   autloaded
+                   (plist-get pl :doc)))
+          " "))))))
 
-(defun elmenu-jump-completing-read ()
-  "Scan buffer and jump to item."
-  (let* ((alist (elmenu-buffer-to-alist))
-         (max-len (1+ (apply #'max (mapcar (lambda (it)
-                                             (length (symbol-name (car it))))
-                                           alist))))
-         (annotf (lambda (str)
-                   (let* ((pl (cdr (assq
-                                    (intern-soft str)
-                                    alist)))
-                          (type (propertize
-                                 (capitalize
-                                  (format "%s"
-                                          (plist-get pl
-                                                     :type)))
-                                 'face
-                                 'font-lock-keyword-face))
-                          (interactivep
-                           (and (plist-get pl :interactive)
-                                (propertize "Command" 'face
-                                            'completions-annotations)))
-                          (autloaded (and (plist-get pl :autoload)
-                                          (propertize
-                                           "AUTOLOAD"
-                                           'face 'font-lock-warning-face))))
-                     (concat
-                      (propertize " " 'display `(space :align-to ,max-len))
-                      (string-join
-                       (remove nil
-                               (list type
-                                     interactivep
-                                     autloaded
-                                     (replace-regexp-in-string
-                                      "[\n\r\f]" "\s"
-                                      (or (plist-get pl
-                                                     :doc)
-                                          ""))))
-                       " ")))))
+(defun elmenu-jump-completing-read (prompt)
+  "Read items in minibuffer with PROMPT."
+  (let* ((alist (elmenu-buffer))
+         (annotf (elmenu-annotate-fn alist))
          (category 'symbol))
     (minibuffer-with-setup-hook
         (lambda ()
@@ -735,7 +762,7 @@ PROPS is a plist to put on overlay."
                                              (current-local-map))))
               (use-local-map map))))
       (assq
-       (intern-soft (completing-read "Symbol: "
+       (intern-soft (completing-read prompt
                                      (lambda (str pred action)
                                        (if (eq action 'metadata)
                                            `(metadata
@@ -750,10 +777,32 @@ PROPS is a plist to put on overlay."
 (defun elmenu-jump ()
   "Scan buffer and jump to item."
   (interactive)
-  (let ((cell (elmenu-jump-completing-read)))
-    (elmenu-buffer-jump-to-form (plist-get (cdr cell) :type)
-                                (car cell))
-    (elmenu-highlight-sexp-at-point)))
+  (let ((cell (elmenu-jump-completing-read "Symbol: ")))
+    (elmenu-buffer-jump-to-form cell)))
+
+;;;###autoload
+(defun elmenu-insert ()
+  "Complete item at point."
+  (interactive)
+  (let* ((cell (elmenu-jump-completing-read "Symbol: "))
+         (current (symbol-name (car cell))))
+    (apply #'insert
+           (if-let ((current-word
+                     (symbol-at-point)))
+               (progn
+                 (if
+                     (string-prefix-p
+                      (symbol-name
+                       current-word)
+                      cell)
+                     (list
+                      (substring-no-properties
+                       current
+                       (length
+                        (symbol-name
+                         current-word))))
+                   (list "\s" current)))
+             (list current)))))
 
 (provide 'elmenu)
 ;;; elmenu.el ends here
