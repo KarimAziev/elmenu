@@ -491,6 +491,13 @@ Arguments BOUND, NOERROR, COUNT has the same meaning as `re-search-forward'."
 (defvar-local elmenu-cached-items-buffer-tick nil
   "Buffer modified tick.")
 
+(defun elmenu-local-vars ()
+  "Return local variables."
+  (when-let ((vars (elisp--local-variables)))
+    (mapcar (lambda (it)
+              `(,it :type local))
+            (elisp--local-variables))))
+
 (defun elmenu-buffer ()
   "Find items in buffer."
   (let ((tick (buffer-modified-tick)))
@@ -752,7 +759,8 @@ PROPS is a plist to put on overlay."
 
 (defun elmenu-jump-completing-read (prompt)
   "Read items in minibuffer with PROMPT."
-  (let* ((alist (elmenu-buffer))
+  (let* ((alist (append (elmenu-buffer)
+                        (elmenu-local-vars)))
          (annotf (elmenu-annotate-fn alist))
          (category 'symbol))
     (minibuffer-with-setup-hook
@@ -771,7 +779,6 @@ PROPS is a plist to put on overlay."
                                          (complete-with-action action alist
                                                                str pred)))))
        alist))))
-
 
 ;;;###autoload
 (defun elmenu-jump ()
