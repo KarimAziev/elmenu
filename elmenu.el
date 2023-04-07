@@ -29,6 +29,10 @@
  
 ;;; Code:
 
+(defcustom elmenu-multi-source-restore-last-input t
+  "Whether to insert last typed source input."
+  :group 'multi-source
+  :type 'boolean)
 
 (defun elmenu-intern-cars (alist)
   "Intern cars in ALIST."
@@ -372,6 +376,13 @@ Arguments BOUND, NOERROR, COUNT has the same meaning as `re-search-forward'."
                           :type type
                           :declared t
                           :beg beg)))
+                  ('cl-defstruct
+                      (cons (if (symbolp sym)
+                                sym
+                              (car-safe sym))
+                            (list
+                             :type type
+                             :beg beg)))
                   ((or 'use-package 'use-package!)
                    (let* ((data (save-excursion
                                   (elmenu-parse-sexp-from-backward)))
@@ -623,8 +634,10 @@ completion UI highly compatible with it, like Icomplete."
   (pcase-let ((`(,_category . ,current)
                (elmenu-minibuffer-get-current-candidate)))
     (with-minibuffer-selected-window
-      (when-let ((cell (assq (intern-soft current)
-                             (elmenu-buffer))))
+      (when-let ((cell (or (assq (intern-soft current)
+                                 (elmenu-buffer))
+                           (assq (intern-soft current)
+                                 (elmenu-all-buffers)))))
         (elmenu-buffer-jump-to-form cell)))))
 
 (defun elmenu-minibuffer-get-current-candidate ()
@@ -757,11 +770,21 @@ PROPS is a plist to put on overlay."
                    (plist-get pl :doc)))
           " "))))))
 
-(defun elmenu-jump-completing-read (prompt)
-  "Read items in minibuffer with PROMPT."
-  (let* ((alist (append (elmenu-buffer)
-                        (elmenu-local-vars)))
-         (annotf (elmenu-annotate-fn alist))
+
+(defun elmenu-all-buffers ()
+  "Scan all elisp buffers."
+  (let ((items))
+    (dolist (buff (buffer-list))
+      (when (and (memq (buffer-local-value 'major-mode buff)
+                       '(emacs-lisp-mode))
+                 (buffer-file-name buff))
+        (with-current-buffer buff
+          (setq items (append items (ignore-errors (elmenu-buffer)))))))
+    items))
+
+(defun elmenu-jump-completing-read (prompt alist)
+  "Read ALIST of elmenu items in minibuffer with PROMPT."
+  (let* ((annotf (elmenu-annotate-fn alist))
          (category 'symbol))
     (minibuffer-with-setup-hook
         (lambda ()
@@ -780,18 +803,199 @@ PROPS is a plist to put on overlay."
                                                                str pred)))))
        alist))))
 
-;;;###autoload
-(defun elmenu-jump ()
-  "Scan buffer and jump to item."
-  (interactive)
-  (let ((cell (elmenu-jump-completing-read "Symbol: ")))
-    (elmenu-buffer-jump-to-form cell)))
+(defun elmenu-jump-completing-read-all (&optional prompt)
+  "Read ALIST of elmenu items from all buffers with PROMPT."
+  (elmenu-jump-completing-read (or prompt "Symbol: ")
+                               (append
+                                (elmenu-local-vars)
+                                (elmenu-all-buffers))))
+
+(defun elmenu-jump-completing-read-from-current-buffer (prompt)
+  "Read ALIST of elmenu items from current buffer in minibuffer with PROMPT."
+  (elmenu-jump-completing-read prompt
+                               (append
+                                (elmenu-local-vars)
+                                (elmenu-buffer))))
+
+(defvar elmenu-multi-source--sources-list nil
+  "Normalized sources.")
+
+(defvar elmenu-multi-source-last-input nil
+  "Last typed input in minibuffer.")
+
+(defvar elmenu-multi-source--current-index nil
+  "Index of active source.")
+
+(defun elmenu-multi-source-switcher (step current-index switch-list)
+  "Increase or decrease CURRENT-INDEX depending on STEP value and SWITCH-LIST."
+  (cond ((> step 0)
+         (if (>= (+ step current-index)
+                 (length switch-list))
+             0
+           (+ step current-index)))
+        ((< step 0)
+         (if (or (<= 0 (+ step current-index)))
+             (+ step current-index)
+           (1- (length switch-list))))
+        (t current-index)))
+
+(defun elmenu-multi-source-set-last-input ()
+  "Save last typed input in mininubbfer."
+  (when (minibufferp)
+    (setq elmenu-multi-source-last-input
+          (buffer-substring (minibuffer-prompt-end)
+                            (point)))))
+
+(defvar elmenu-multi-source-minibuffer-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "M-.") 'multi-source-select-next)
+    (define-key map (kbd "C-.") 'multi-source-read-source)
+    map)
+  "Keymap to use in minibuffer.")
+
+(defun elmenu-multi-source-map-sources (sources)
+  "Normalize SOURCES to list of functions, labels and arguments."
+  (let ((curr)
+        (labels)
+        (args)
+        (fns))
+    (while (setq curr (pop sources))
+      (pcase curr
+        ((pred stringp)
+         (let ((fn (pop sources)))
+           (push curr labels)
+           (push fn fns)
+           (push nil args)))
+        ((pred functionp)
+         (let ((label
+                (if (symbolp curr)
+                    (symbol-name curr)
+                  "")))
+           (push label labels)
+           (push curr fns)
+           (push nil args)))
+        ((pred listp)
+         (let* ((label (car curr))
+                (rest (cdr curr))
+                (fn (if (listp rest)
+                        (car rest)
+                      rest))
+                (extra-args (when (listp rest)
+                              (cdr rest))))
+           (push label labels)
+           (push (if (or (functionp fn)
+                         (symbolp fn))
+                     fn
+                   `(lambda () ,fn))
+                 fns)
+           (push extra-args args)))))
+    (list (reverse fns)
+          (reverse labels)
+          (reverse args))))
+
+(defun elmenu-multi-source-read (sources)
+  "Combine minibuffer SOURCES into a command with several alternatives.
+
+Every alternative should be a function that reads data from minibuffer.
+
+By default the first source is called and user can switch between
+alternatives dynamically with commands:
+
+ `multi-source-select-next' (bound to \\<multi-source-minibuffer-map>\
+`\\[multi-source-select-next]') - select next alternative.
+ `multi-source-select-prev' (bound to \\<multi-source-minibuffer-map>\
+`\\[multi-source-select-prev]') - select previus alternative.
+ `multi-source-read-source' (bound to \\<multi-source-minibuffer-map>\
+`\\[multi-source-read-source]') - select from completions list.
+
+Allowed forms for SOURCES are
+ - a list of functions
+ - a plist of backend's name and corresponding function,
+-  an alist of backend's name, corresponding function and optionally extra
+ arguments to pass."
+  (setq elmenu-multi-source--sources-list (elmenu-multi-source-map-sources
+                                           sources))
+  (setq elmenu-multi-source--current-index 0)
+  (setq elmenu-multi-source-last-input nil)
+  (let ((curr)
+        (fns (nth 0 elmenu-multi-source--sources-list))
+        (args (nth 2 elmenu-multi-source--sources-list)))
+    (while (numberp
+            (setq curr
+                  (catch 'next
+                    (minibuffer-with-setup-hook
+                        (lambda ()
+                          (use-local-map
+                           (let ((map
+                                  (copy-keymap
+                                   elmenu-multi-source-minibuffer-map)))
+                             (set-keymap-parent map (current-local-map))
+                             map))
+                          (when (minibuffer-window-active-p
+                                 (selected-window))
+                            (when (and elmenu-multi-source-restore-last-input
+                                       elmenu-multi-source-last-input)
+                              (insert
+                               elmenu-multi-source-last-input))
+                            (add-hook
+                             'post-command-hook
+                             #'elmenu-multi-source-set-last-input
+                             nil t)
+                            (add-hook
+                             'minibuffer-exit-hook
+                             #'elmenu-multi-source-set-last-input
+                             nil t)
+                            (add-hook
+                             'post-self-insert-hook
+                             #'elmenu-multi-source-set-last-input
+                             nil t)))
+                      (apply (nth elmenu-multi-source--current-index fns)
+                             (nth elmenu-multi-source--current-index args))))))
+      (setq elmenu-multi-source--current-index
+            (elmenu-multi-source-switcher curr
+                                          elmenu-multi-source--current-index
+                                          fns)))
+    (setq elmenu-multi-source-last-input nil)
+    (setq elmenu-multi-source--sources-list nil)
+    curr))
+
 
 ;;;###autoload
-(defun elmenu-insert ()
-  "Complete item at point."
-  (interactive)
-  (let* ((cell (elmenu-jump-completing-read "Symbol: "))
+(defun elmenu-jump (&optional arg)
+  "Scan buffer and jump to item.
+With optional argument ARG extract items from all buffers."
+  (interactive "P")
+  (let* ((sources `(("All" elmenu-jump-completing-read-all
+                     "Symbol (all buffers): ")
+                    (,(buffer-name)
+                     elmenu-jump-completing-read
+                     "Symbol: "
+                     ,(append
+                       (elmenu-local-vars)
+                       (elmenu-buffer)))))
+         (cell (elmenu-multi-source-read (if (not arg)
+                                             sources
+                                           (reverse sources)))))
+    
+    (elmenu-buffer-jump-to-form cell)))
+
+
+;;;###autoload
+(defun elmenu-insert (&optional arg)
+  "Complete item at point.
+With optional argument ARG extract items from all buffers."
+  (interactive "P")
+  (let* ((sources `(("All" elmenu-jump-completing-read-all
+                     "Symbol (all buffers): ")
+                    (,(buffer-name)
+                     elmenu-jump-completing-read
+                     "Symbol: "
+                     ,(append
+                       (elmenu-local-vars)
+                       (elmenu-buffer)))))
+         (cell (elmenu-multi-source-read (if (not arg)
+                                             sources
+                                           (reverse sources))))
          (current (symbol-name (car cell))))
     (apply #'insert
            (if-let ((current-word
