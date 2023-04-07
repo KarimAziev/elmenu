@@ -628,6 +628,17 @@ completion UI highly compatible with it, like Icomplete."
     (abort-minibuffers)))
 
 ;;;###autoload
+(defun elmenu-insert-no-exit ()
+  "Exit minibuffer and insert selection."
+  (interactive)
+  (pcase-let ((`(,_category . ,current)
+               (elmenu-minibuffer-get-current-candidate)))
+    (with-minibuffer-selected-window
+      (when (symbol-at-point)
+        (newline-and-indent))
+      (insert current))))
+
+;;;###autoload
 (defun elmenu-minibuffer-jump-to-item ()
   "Call ACTION with minibuffer candidate in its original window."
   (interactive)
@@ -662,6 +673,8 @@ completion UI highly compatible with it, like Icomplete."
                 #'elmenu-minibuffer-jump-to-item)
     (define-key map (kbd "C-c TAB")
                 #'elmenu-insert-and-exit)
+    (define-key map (kbd "C-i")
+                #'elmenu-insert-no-exit)
     map))
 
 (defun elmenu-overlay-unset-and-remove (var-symbol)
