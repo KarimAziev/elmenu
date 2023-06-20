@@ -1046,8 +1046,8 @@ PROPS is a plist to put on overlay."
     items))
 
 (defun elmenu-jump-completing-read (prompt alist)
-	"Read ALIST of elmenu items in minibuffer with PROMPT."
-	(let* ((alist (copy-tree alist))
+  "Read ALIST of elmenu items in minibuffer with PROMPT."
+  (let* ((alist (copy-tree alist))
          (annotf (elmenu-annotate-fn alist))
          (category 'symbol))
     (minibuffer-with-setup-hook
@@ -1056,18 +1056,18 @@ PROPS is a plist to put on overlay."
             (let ((map (make-composed-keymap elmenu-minibuffer-map
                                              (current-local-map))))
               (use-local-map map))))
-			(let ((item (completing-read prompt
-																	 (lambda (str pred action)
-																		 (if (eq action 'metadata)
-																				 `(metadata
-																					 (annotation-function . ,annotf)
-																					 (category . ,category))
-																			 (complete-with-action action alist
-																														 str pred))))))
-				(or (assq
-						 (intern-soft item)
-						 alist)
-						item)))))
+      (let ((item (completing-read prompt
+                                   (lambda (str pred action)
+                                     (if (eq action 'metadata)
+                                         `(metadata
+                                           (annotation-function . ,annotf)
+                                           (category . ,category))
+                                       (complete-with-action action alist
+                                                             str pred))))))
+        (or (assq
+             (intern-soft item)
+             alist)
+            item)))))
 
 (defun elmenu-jump-completing-read-all (&optional prompt)
   "Read ALIST of elmenu items from all buffers with PROMPT."
@@ -1077,8 +1077,8 @@ PROPS is a plist to put on overlay."
                                 (elmenu-all-buffers))))
 
 (defun elmenu-jump-completing-read-from-current-buffer (&optional prompt)
-	"Read ALIST of elmenu items from current buffer in minibuffer with PROMPT."
-	(elmenu-jump-completing-read (or prompt "Symbol: ")
+  "Read ALIST of elmenu items from current buffer in minibuffer with PROMPT."
+  (elmenu-jump-completing-read (or prompt "Symbol: ")
                                (append
                                 (elmenu-local-vars)
                                 (elmenu-buffer))))
@@ -1160,7 +1160,7 @@ PROPS is a plist to put on overlay."
           (reverse args))))
 
 (defun elmenu-multi-source-read (sources)
-	"Combine minibuffer SOURCES into a command with several alternatives.
+  "Combine minibuffer SOURCES into a command with several alternatives.
 
 Every alternative should be a function that reads data from minibuffer.
 
@@ -1179,7 +1179,7 @@ Allowed forms for SOURCES are
  - a plist of backend's name and corresponding function,
 -  an alist of backend's name, corresponding function and optionally extra
  arguments to pass."
-	(setq elmenu-multi-source--sources-list (elmenu-multi-source-map-sources
+  (setq elmenu-multi-source--sources-list (elmenu-multi-source-map-sources
                                            sources))
   (setq elmenu-multi-source--current-index 0)
   (setq elmenu-multi-source-last-input nil)
@@ -1193,8 +1193,8 @@ Allowed forms for SOURCES are
                         (lambda ()
                           (use-local-map
                            (make-composed-keymap
-														elmenu-multi-source-minibuffer-map
-														(current-local-map)))
+                            elmenu-multi-source-minibuffer-map
+                            (current-local-map)))
                           (when (minibuffer-window-active-p
                                  (selected-window))
                             (when (and elmenu-multi-source-restore-last-input
@@ -1226,9 +1226,9 @@ Allowed forms for SOURCES are
 
 ;;;###autoload
 (defun elmenu-jump (&optional arg)
-	"Scan buffer and jump to item.
+  "Scan buffer and jump to item.
 With optional argument ARG extract items from all buffers."
-	(interactive "P")
+  (interactive "P")
   (let* ((sources `((,(buffer-name)
                      elmenu-jump-completing-read-from-current-buffer)
                     ("All" elmenu-jump-completing-read-all
@@ -1239,11 +1239,11 @@ With optional argument ARG extract items from all buffers."
     (elmenu-buffer-jump-to-form cell)))
 
 (defun elmenu-read-buffer-items ()
-	"Read items in buffer."
-	(elmenu-jump-completing-read "Symbol: "
-															 (append
-																(elmenu-local-vars)
-																(elmenu-buffer))))
+  "Read items in buffer."
+  (elmenu-jump-completing-read "Symbol: "
+                               (append
+                                (elmenu-local-vars)
+                                (elmenu-buffer))))
 
 
 ;;;###autoload
