@@ -978,7 +978,7 @@ PROPS is a plist to put on overlay."
   (let* ((names (remove nil
                         (mapcar (lambda (it)
                                   (if (symbolp (car-safe it))
-                                      (length (symbol-name (car it)))
+                                      (length (symbol-name (car-safe it)))
                                     (if (stringp (car-safe it))
                                         (car-safe it)
                                       nil)))
@@ -1022,10 +1022,12 @@ PROPS is a plist to put on overlay."
                                             args
                                             autloaded
                                             lib
-                                            (and (if (stringp (plist-get pl :doc))
-                                                     (car (split-string (plist-get
-                                                                         pl :doc)
-                                                                        "\n" t))
+                                            (and (if (stringp
+                                                      (plist-get pl :doc))
+                                                     (car (split-string
+                                                           (plist-get
+                                                            pl :doc)
+                                                           "\n" t))
                                                    nil)))))))
         (concat
          (propertize " " 'display `(space :align-to ,max-len))
