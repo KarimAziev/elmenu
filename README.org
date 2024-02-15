@@ -4,7 +4,7 @@ Imenu like utility for jumping to Elisp Symbols.
 
 ** Installation
 
-Emacs >= 28.1 is required.
+Emacs >= 29.1 is required.
 
 *** Manual
 
