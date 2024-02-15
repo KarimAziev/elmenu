@@ -471,7 +471,7 @@ Arguments BOUND, NOERROR, COUNT has the same meaning as `re-search-forward'."
                             (list
                              :type type)))
                   ((or 'use-package 'use-package!)
-                   (let* ((data (mapcar 'elmenu-parse-sexp item))
+                   (let* ((data (mapcar #'elmenu-parse-sexp item))
                           (v (cons sym (list
                                         :type type))))
                      (if data
@@ -483,7 +483,7 @@ Arguments BOUND, NOERROR, COUNT has the same meaning as `re-search-forward'."
                        'and
                        'let 'if-let 'when-let 'with-no-warnings
                        'when 'unless 'eval-and-compile)
-                   (mapcar 'elmenu-parse-sexp (cdr item)))
+                   (mapcar #'elmenu-parse-sexp (cdr item)))
                   ('require
                    (let* ((file (elmenu-find-lib-in-dir
                                  sym
@@ -500,7 +500,7 @@ Arguments BOUND, NOERROR, COUNT has the same meaning as `re-search-forward'."
                    (cons sym
                          (list
                           :type type
-                          :args (seq-find 'proper-list-p item)
+                          :args (seq-find #'proper-list-p item)
                           :doc doc
                           :interactive
                           (when (assq type elmenu-interactive-types)
@@ -621,7 +621,7 @@ Arguments BOUND, NOERROR, COUNT has the same meaning as `re-search-forward'."
                          (list
                           :type type
                           :start beg
-                          :args (seq-find 'proper-list-p item)
+                          :args (seq-find #'proper-list-p item)
                           :doc doc
                           :interactive
                           (when (assq type elmenu-interactive-types)
@@ -720,7 +720,7 @@ Arguments BOUND, NOERROR, COUNT has the same meaning as `re-search-forward'."
             (elisp--local-variables))))
 
 (defun elmenu-cached-or-rescan ()
-  "Find items in buffer."
+  "Cache items or rescan buffer if modified."
   (let ((tick (buffer-modified-tick)))
     (if (eq elmenu-cached-items-buffer-tick tick)
         elmenu-cached-items
@@ -729,7 +729,7 @@ Arguments BOUND, NOERROR, COUNT has the same meaning as `re-search-forward'."
             (elmenu--buffer)))))
 
 (defun elmenu-buffer ()
-  "Find items in buffer."
+  "Scan current buffer for provided Emacs Lisp symbols."
   (setq elmenu-visited-syms nil)
   (when-let ((name (save-excursion
                      (goto-char (point-max))
@@ -747,7 +747,7 @@ Arguments BOUND, NOERROR, COUNT has the same meaning as `re-search-forward'."
                              (file-name-nondirectory
                               buffer-file-name)))))))
     (push (intern name) elmenu-visited-syms)
-    (elmenu--buffer)))
+    (elmenu-cached-or-rescan)))
 
 (defun elmenu-plist-remove-nils (plist)
   "Return the keys in PLIST."
@@ -860,7 +860,7 @@ completion UI highly compatible with it, like Icomplete."
 
 ;;;###autoload
 (defun elmenu-insert-no-exit ()
-  "Exit minibuffer and insert selection."
+  "Insert current minibuffer candidate into buffer."
   (interactive)
   (pcase-let ((`(,_category . ,current)
                (elmenu-minibuffer-get-current-candidate)))
@@ -955,8 +955,9 @@ PROPS is a plist to put on overlay."
                                        buffer front-advance
                                        rear-advance)
                                  props))))
+
 (defun elmenu-highlight-sexp-at-point ()
-  "Highlight region between START and END with FACE."
+  "Highlight the s-expression at point."
   (pcase-let ((`(,start . ,end)
                (bounds-of-thing-at-point 'sexp)))
     (when (and start end)
@@ -987,7 +988,7 @@ PROPS is a plist to put on overlay."
                     1)))
     (lambda (str)
       (let* ((sym (if (stringp str)
-                      (intern-soft str)
+                      (intern str)
                     str))
              (pl (cdr (assq
                        sym
@@ -1015,7 +1016,7 @@ PROPS is a plist to put on overlay."
                               'face 'font-lock-warning-face)))
              (final
               (remove nil
-                      (seq-filter 'stringp (list
+                      (seq-filter #'stringp (list
                                             (if interactivep
                                                 (concat interactivep " " type)
                                               type)
@@ -1116,10 +1117,33 @@ PROPS is a plist to put on overlay."
 
 (defvar elmenu-multi-source-minibuffer-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "M-.") 'multi-source-select-next)
-    (define-key map (kbd "C-.") 'multi-source-read-source)
+    (define-key map (kbd "M-.") #'elmenu--multi-source-select-next)
+    (define-key map (kbd "C-.") #'elmenu--multi-source-read-source)
+    (define-key map (kbd "C->") #'elmenu--multi-source-select-next)
+    (define-key map (kbd "C-<") #'elmenu--multi-source-select-prev)
     map)
   "Keymap to use in minibuffer.")
+
+(defun elmenu--multi-source-select-next ()
+  "Throw to the catch tag ='next with 1."
+  (interactive)
+  (throw 'next
+         1))
+
+(defun elmenu--multi-source-select-prev ()
+  "Throw to the catch tag ='next with -1."
+  (interactive)
+  (throw 'next
+         -1))
+
+(defun elmenu--multi-source-read-source ()
+  "Select a source by label and calculate index offset."
+  (interactive)
+  (let* ((source-label
+          (completing-read "Source: " (nth 1 elmenu-multi-source--sources-list)))
+         (pos (seq-position (nth 1 elmenu-multi-source--sources-list)
+                            source-label)))
+    (throw 'next (- pos elmenu-multi-source--sources-list))))
 
 (defun elmenu-multi-source-map-sources (sources)
   "Normalize SOURCES to list of functions, labels and arguments."
@@ -1169,12 +1193,11 @@ Every alternative should be a function that reads data from minibuffer.
 By default the first source is called and user can switch between
 alternatives dynamically with commands:
 
- `multi-source-select-next' (bound to \\<multi-source-minibuffer-map>\
-`\\[multi-source-select-next]') - select next alternative.
- `multi-source-select-prev' (bound to \\<multi-source-minibuffer-map>\
-`\\[multi-source-select-prev]') - select previus alternative.
- `multi-source-read-source' (bound to \\<multi-source-minibuffer-map>\
-`\\[multi-source-read-source]') - select from completions list.
+- switch to next source: \\<elmenu-multi-source-minibuffer-map>\\[elmenu--multi-source-select-next] `elmenu--multi-source-select-next'
+
+- switch to previous source: \\<elmenu-multi-source-minibuffer-map>\\[elmenu--multi-source-select-prev] `elmenu--multi-source-select-prev'
+
+- select from completions list: \\<elmenu-multi-source-minibuffer-map>\\[elmenu--multi-source-read-source] `elmenu--multi-source-read-source'
 
 Allowed forms for SOURCES are
  - a list of functions
