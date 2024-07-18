@@ -27,7 +27,7 @@
 ;;; Commentary:
 
 ;; Completing read for elisp symbols in buffer
- 
+
 ;;; Code:
 
 
@@ -830,7 +830,19 @@ completion UI highly compatible with it, like Icomplete."
 
 (defvar elmenu-minibuffer-targets-finders
   '(elmenu-minibuffer-ivy-selected-cand
+    elmenu--vertico-selected
     elmenu-minibuffer-default-top-minibuffer-completion))
+
+(declare-function vertico--candidate "ext:vertico")
+(declare-function vertico--update "ext:vertico")
+
+(defun elmenu--vertico-selected ()
+  "Target the currently selected item in Vertico.
+Return the category metadatum as the type of the target."
+  (when (bound-and-true-p vertico--input)
+    (vertico--update)
+    (cons (completion-metadata-get (elmenu-minibuffer-get-metadata) 'category)
+          (vertico--candidate))))
 
 
 ;;;###autoload
