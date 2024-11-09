@@ -275,7 +275,7 @@ Return new position if changed, nil otherwise."
 
 (defun elmenu-list-at-point ()
   "Return list at point."
-  (when-let ((sexp (sexp-at-point)))
+  (when-let* ((sexp (sexp-at-point)))
     (when (proper-list-p sexp)
       sexp)))
 
@@ -363,14 +363,14 @@ Arguments BOUND, NOERROR, COUNT has the same meaning as `re-search-forward'."
 (defun elmenu-find-lib-in-dir (sym dir)
   "Lookup for library SYM in current directory DIR."
   (require 'find-func)
-  (when-let ((file (ignore-errors
+  (when-let* ((file (ignore-errors
                      (find-library-name (symbol-name sym)))))
     (when (file-in-directory-p file dir)
       file)))
 (defun elmenu-parse-require (sym)
   "Lookup for library SYM in current directory and parse it."
   (require 'find-func)
-  (when-let ((dir default-directory)
+  (when-let* ((dir default-directory)
              (file (ignore-errors
                      (find-library-name (symbol-name sym)))))
     (when (file-in-directory-p file dir)
@@ -715,7 +715,7 @@ Arguments BOUND, NOERROR, COUNT has the same meaning as `re-search-forward'."
 
 (defun elmenu-local-vars ()
   "Return local variables."
-  (when-let ((vars (elisp--local-variables)))
+  (when-let* ((vars (elisp--local-variables)))
     (mapcar (lambda (it)
               `(,it :type local))
             (elisp--local-variables))))
@@ -732,7 +732,7 @@ Arguments BOUND, NOERROR, COUNT has the same meaning as `re-search-forward'."
 (defun elmenu-buffer ()
   "Scan current buffer for provided Emacs Lisp symbols."
   (setq elmenu-visited-syms nil)
-  (when-let ((name (save-excursion
+  (when-let* ((name (save-excursion
                      (goto-char (point-max))
                      (cond ((re-search-backward
                              (rx "(provide '"
@@ -853,7 +853,7 @@ Return the category metadatum as the type of the target."
                (elmenu-minibuffer-get-current-candidate)))
     (with-minibuffer-selected-window
       (apply #'insert
-             (if-let ((current-word
+             (if-let* ((current-word
                        (symbol-at-point)))
                  (progn
                    (if
@@ -889,7 +889,7 @@ Return the category metadatum as the type of the target."
   (pcase-let ((`(,_category . ,current)
                (elmenu-minibuffer-get-current-candidate)))
     (with-minibuffer-selected-window
-      (when-let ((cell (or (assq (intern-soft current)
+      (when-let* ((cell (or (assq (intern-soft current)
                                  (elmenu-buffer))
                            (assq (intern-soft current)
                                  (elmenu-all-buffers)))))
@@ -901,7 +901,7 @@ Return the category metadatum as the type of the target."
     (run-hook-wrapped
      'elmenu-minibuffer-targets-finders
      (lambda (fun)
-       (when-let ((result (funcall fun)))
+       (when-let* ((result (funcall fun)))
          (when (and (cdr-safe result)
                     (stringp (cdr-safe result))
                     (not (string-empty-p (cdr-safe result))))
@@ -1302,7 +1302,7 @@ With optional argument ARG extract items from all buffers."
                                            (reverse sources))))
          (current (symbol-name (car cell))))
     (apply #'insert
-           (if-let ((current-word
+           (if-let* ((current-word
                      (symbol-at-point)))
                (progn
                  (if
